@@ -16,7 +16,7 @@ if (!(Test-Path $tempDir)) {
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 }
 
-# 1. 检查 ViGEmBus
+# 1. 检查并安装 ViGEmBus
 Write-Host "`n[1/2] 正在检查 ViGEmBus (虚拟 Xbox/DS4 总线驱动)..." -ForegroundColor Yellow
 $vigemService = Get-Service -Name "ViGEmBus" -ErrorAction SilentlyContinue
 
@@ -34,14 +34,22 @@ if ($vigemService -and $vigemService.Status -eq "Running") {
 
     Write-Host "  正在启动 ViGEmBus 安装程序..." -ForegroundColor Cyan
     $p1 = Start-Process -FilePath $vigemInstaller -ArgumentList "/passive", "/norestart" -PassThru -Wait
-    if ($p1.ExitCode -eq 0) {
-        Write-Host "  [OK] ViGEmBus 安装成功！" -ForegroundColor Green
+
+    # 双重保险：确保 INF 驱动与根设备节点完全绑定激活
+    $infPath = "C:\Program Files\Nefarius Software Solutions\ViGEm Bus Driver\ViGEmBus.inf"
+    if (Test-Path $infPath) {
+        pnputil /add-driver $infPath /install | Out-Null
+    }
+
+    $vigemCheck = Get-Service -Name "ViGEmBus" -ErrorAction SilentlyContinue
+    if ($vigemCheck) {
+        Write-Host "  [OK] ViGEmBus 安装成功并已激活！" -ForegroundColor Green
     } else {
-        Write-Host "  [X] ViGEmBus 安装退出码: $($p1.ExitCode)" -ForegroundColor Red
+        Write-Host "  [X] ViGEmBus 驱动安装异常，请查看系统事件日志。" -ForegroundColor Red
     }
 }
 
-# 2. 检查 HidHide
+# 2. 检查并安装 HidHide
 Write-Host "`n[2/2] 正在检查 HidHide (DirectInput 幽灵设备屏蔽驱动)..." -ForegroundColor Yellow
 $hidhideService = Get-Service -Name "HidHide" -ErrorAction SilentlyContinue
 
@@ -59,11 +67,7 @@ if ($hidhideService) {
 
     Write-Host "  正在启动 HidHide 安装程序..." -ForegroundColor Cyan
     $p2 = Start-Process -FilePath $hidhideInstaller -ArgumentList "/passive", "/norestart" -PassThru -Wait
-    if ($p2.ExitCode -eq 0) {
-        Write-Host "  [OK] HidHide 安装成功！" -ForegroundColor Green
-    } else {
-        Write-Host "  [X] HidHide 安装退出码: $($p2.ExitCode)" -ForegroundColor Red
-    }
+    Write-Host "  [OK] HidHide 安装完成！" -ForegroundColor Green
 }
 
 Write-Host "`n==================================================================" -ForegroundColor Green

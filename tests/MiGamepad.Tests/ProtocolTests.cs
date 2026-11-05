@@ -1,12 +1,37 @@
 using System;
 using MiGamepad.Core.Native;
 using MiGamepad.Core.Protocol;
+using Nefarius.Drivers.HidHide;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace MiGamepad.Tests
 {
     public class ProtocolTests
     {
+        private readonly ITestOutputHelper _output;
+
+        public ProtocolTests(ITestOutputHelper output)
+        {
+            _output = output;
+        }
+
+        [Fact]
+        public void TestHidHideService()
+        {
+            try
+            {
+                var service = new HidHideControlService();
+                _output.WriteLine($"IsInstalled: {service.IsInstalled}");
+                _output.WriteLine($"IsOperational: {service.IsOperational}");
+                _output.WriteLine($"IsActive: {service.IsActive}");
+            }
+            catch (Exception ex)
+            {
+                _output.WriteLine($"Exception: {ex.GetType().Name} - {ex.Message}");
+            }
+        }
+
         [Fact]
         public void Parse_InvalidReport_ReturnsFalse()
         {
@@ -15,7 +40,7 @@ namespace MiGamepad.Tests
             Assert.False(report.Parse(tooShort));
 
             byte[] wrongId = new byte[21];
-            wrongId[0] = 0x01; // Should be 0x04
+            wrongId[0] = 0x01;
             Assert.False(report.Parse(wrongId));
         }
 
@@ -24,31 +49,14 @@ namespace MiGamepad.Tests
         {
             var report = new XiaomiInputReport();
             byte[] raw = new byte[21];
-            raw[0] = 0x04; // Report ID
-
-            // Set buttons: A (bit 0), Y (bit 4), RB (bit 7)
+            raw[0] = 0x04;
             raw[1] = (byte)(1 | 16 | 128);
-
-            // Set buttons: Back (bit 2), RightThumb (bit 6)
             raw[2] = (byte)(4 | 64);
-
-            // D-Pad Hat Switch: Up (0)
             raw[4] = 0;
-
-            // Sticks: Center ~128
-            raw[5] = 128;
-            raw[6] = 128;
-            raw[7] = 128;
-            raw[8] = 128;
-
-            // Triggers: LT=100, RT=255
+            raw[5] = 128; raw[6] = 128; raw[7] = 128; raw[8] = 128;
             raw[11] = 100;
             raw[12] = 255;
-
-            // Battery: 88%
             raw[19] = 88;
-
-            // MI Logo Button (Guide): Bit 0
             raw[20] = 1;
 
             bool success = report.Parse(raw);
@@ -79,15 +87,15 @@ namespace MiGamepad.Tests
         }
 
         [Theory]
-        [InlineData(0, true, false, false, false)]  // Up
-        [InlineData(1, true, false, false, true)]   // Up-Right
-        [InlineData(2, false, false, false, true)]  // Right
-        [InlineData(3, false, true, false, true)]   // Down-Right
-        [InlineData(4, false, true, false, false)]  // Down
-        [InlineData(5, false, true, true, false)]   // Down-Left
-        [InlineData(6, false, false, true, false)]  // Left
-        [InlineData(7, true, false, true, false)]   // Up-Left
-        [InlineData(15, false, false, false, false)]// Released
+        [InlineData(0, true, false, false, false)]
+        [InlineData(1, true, false, false, true)]
+        [InlineData(2, false, false, false, true)]
+        [InlineData(3, false, true, false, true)]
+        [InlineData(4, false, true, false, false)]
+        [InlineData(5, false, true, true, false)]
+        [InlineData(6, false, false, true, false)]
+        [InlineData(7, true, false, true, false)]
+        [InlineData(15, false, false, false, false)]
         public void Parse_DPadHatSwitch_CorrectDirections(byte hatValue, bool up, bool down, bool left, bool right)
         {
             var report = new XiaomiInputReport();
@@ -109,13 +117,9 @@ namespace MiGamepad.Tests
             var report = new XiaomiInputReport();
             byte[] raw = new byte[21];
             raw[0] = 0x04;
-            raw[4] = 15; // DPad neutral
+            raw[4] = 15;
 
-            // Test Center within deadzone (128 -> should be 0)
-            raw[5] = 128;
-            raw[6] = 128;
-            raw[7] = 132; // Small drift within deadzone
-            raw[8] = 124; // Small drift within deadzone
+            raw[5] = 128; raw[6] = 128; raw[7] = 132; raw[8] = 124;
 
             Assert.True(report.Parse(raw));
             Assert.Equal(0, report.LeftThumbX);
@@ -123,16 +127,14 @@ namespace MiGamepad.Tests
             Assert.Equal(0, report.RightThumbX);
             Assert.Equal(0, report.RightThumbY);
 
-            // Test Left Thumb Max Right (255) and Max Up (0 in HID -> +32767 in XInput)
             raw[5] = 255;
-            raw[6] = 0; // Pushed all the way UP
+            raw[6] = 0;
             Assert.True(report.Parse(raw));
             Assert.Equal(32767, report.LeftThumbX);
             Assert.Equal(32767, report.LeftThumbY);
 
-            // Test Left Thumb Max Left (0) and Max Down (255 in HID -> -32768 in XInput)
             raw[5] = 0;
-            raw[6] = 255; // Pushed all the way DOWN
+            raw[6] = 255;
             Assert.True(report.Parse(raw));
             Assert.Equal(-32768, report.LeftThumbX);
             Assert.Equal(-32768, report.LeftThumbY);

@@ -21,7 +21,19 @@ namespace MiGamepad.Core.Cloaking
             try
             {
                 _service = new HidHideControlService();
-                if (_service.IsInstalled)
+
+                // 检查驱动是否可用（支持通过句柄响应 IOCTL 读取 IsActive）
+                bool operational = false;
+                try
+                {
+                    operational = _service.IsInstalled || _service.IsOperational || _service.IsActive;
+                }
+                catch
+                {
+                    operational = false;
+                }
+
+                if (operational)
                 {
                     _isAvailable = true;
                     ConfigureCurrentProcessWhitelist();
