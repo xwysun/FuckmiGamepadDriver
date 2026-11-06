@@ -81,14 +81,26 @@ flowchart TD
 | **Byte 19** | Battery Level | `0 ~ 100` | 电池电量百分比 |
 | **Byte 20** | Special Buttons | 位掩码 | Bit 0: MI 徽标键 (映射为 Xbox Guide 键 / Xbox Game Bar) |
 
-### 3. 震动特征包 (SetFeature Report, 长度 3 字节)
-通过调用 Windows HID 的 `HidD_SetFeature` 向手柄下发马达控制指令：
+### 3. 震动特征包 (SetFeature Report, 缓冲 7 字节)
+
+> **2026-11 真机实测修订**：设备 HID 描述符声明 `FeatureReportByteLength = 7`、`OutputReportByteLength = 0`。
+> 早期设计假设的"3 字节特征包"会被 Windows HIDCLASS 直接拒绝（返回失败但不抛异常，极易被忽略），
+> 这正是初版震动无效的根因。参考资料：[irungentoo/Xiaomi_gamepad](https://github.com/irungentoo/Xiaomi_gamepad)。
+
+通过调用 Windows HID 的 `HidD_SetFeature` 向手柄下发马达控制指令，**缓冲长度必须等于 7 字节**（即设备声明的特征报文总长度），不足部分以 `0x00` 填充：
+
 ```text
-[0x20] [Small Motor Strength (0x00-0xFF)] [Big Motor Strength (0x00-0xFF)]
+[0x20] [Small Motor Strength (0x00-0xFF)] [Big Motor Strength (0x00-0xFF)] [0x00 x4 保留]
 ```
 * **Byte 0**: `0x20`（小米手柄专属震动指令 ID）
 * **Byte 1**: 右侧弱震马达（高频细震）强度
 * **Byte 2**: 左侧强震马达（低频重震）强度
+* **Byte 3~6**: 保留，填 `0x00`
+
+工程约束（均为实测结论）：
+* **输出报文通路不存在**：`OutputReportByteLength = 0`，`WriteFile` / `HidD_SetOutputReport` 均返回 `ERROR_INVALID_FUNCTION`，`SetFeature` 是唯一震动通路。
+* **震动必须使用独立文件句柄**：在同一句柄上混用"挂起的异步输入读"与 `HidD_SetFeature` 会互相中止（读循环被 `ERROR_OPERATION_ABORTED` 打断），输入与震动各开一条 `CreateFile` 句柄。
+* **停止震动**：下发 `[0x20][0x00][0x00]`（特征通路实测有效）。
 
 ---
 
@@ -112,7 +124,7 @@ flowchart TD
 * **节流器算法**：
   * 限制更新频率为 30Hz（即两次下发最小间隔 33ms）。
   * 脏数据检查：如果当前震动数值与上一帧相同，不重复下发，避免蓝牙信道拥塞导致通信卡顿与断连。
-  * 3 秒无更新超时保护：若马达持续震动超过 3 秒没有新指令更新，自动停止震动保护电机与手柄电量。
+  * 3 秒无更新超时保护：若马达持续震动且超过 3 秒**没有收到任何新的震动指令**（相同数值的重复指令同样视为有效更新），自动停止震动保护电机与手柄电量；否则游戏以恒定强度持续震动的场景会被误杀。
 
 ### 4. 摇杆非线性校准与死区保护
 * 针对老化手柄摇杆物理漂移，引入可调节的死区半径：

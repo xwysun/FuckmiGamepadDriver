@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
+using MiGamepad.Core.Configuration;
 using MiGamepad.Core.Native;
 using MiGamepad.Core.Protocol;
 using Nefarius.ViGEm.Client;
@@ -25,9 +26,13 @@ namespace MiGamepad.Core.Devices
         public event EventHandler<XiaomiInputReport>? StateUpdated;
         public event EventHandler? Disconnected;
 
+        /// <summary>震动指令下发失败/恢复时触发，用于上层诊断日志</summary>
+        public event EventHandler<string>? RumbleSendFailed;
+
         private readonly ViGEmClient _vigemClient;
         private readonly SafeFileHandle _deviceHandle;
         private readonly FileStream _deviceStream;
+        private readonly SafeFileHandle? _rumbleHandle;
         private readonly RumbleEngine _rumbleEngine;
         private readonly IXbox360Controller _virtualController;
         private readonly CancellationTokenSource _cts = new();
@@ -43,6 +48,10 @@ namespace MiGamepad.Core.Devices
             PlayerIndex = playerIndex;
             _vigemClient = vigemClient;
 
+            // 服务开机启动时用户注册表尚未加载 (HKU 为空), Game Bar 检测会误判,
+            // 因此在手柄接入时 (用户已登录) 重新解析配置
+            GamepadSettings.Reload();
+
             // 打开物理手柄 HID 句柄
             _deviceHandle = Win32Hid.OpenDevice(devicePath, exclusive: false);
             if (_deviceHandle.IsInvalid)
@@ -53,8 +62,25 @@ namespace MiGamepad.Core.Devices
             // 初始化异步文件流（重叠 I/O）
             _deviceStream = new FileStream(_deviceHandle, FileAccess.ReadWrite, 64, isAsync: true);
 
-            // 初始化震动引擎
-            _rumbleEngine = new RumbleEngine(_deviceHandle);
+            // 查询设备特征报文长度 (实测 7 字节)，震动缓冲必须与之严格一致
+            int featureReportByteLength = 7;
+            var caps = Win32Hid.GetDeviceCaps(_deviceHandle);
+            if (caps != null && caps.Value.FeatureReportByteLength > 0)
+            {
+                featureReportByteLength = caps.Value.FeatureReportByteLength;
+            }
+
+            // 为震动单独打开一条句柄: 控制传输与同一句柄上挂起的异步读会互相中止
+            _rumbleHandle = Win32Hid.OpenDevice(devicePath, exclusive: false);
+            if (_rumbleHandle.IsInvalid)
+            {
+                _rumbleHandle.Dispose();
+                _rumbleHandle = null;
+            }
+
+            // 初始化震动引擎 (独立句柄 + 实测报文长度)
+            _rumbleEngine = new RumbleEngine(_rumbleHandle, featureReportByteLength);
+            _rumbleEngine.SendFailed += (s, message) => RumbleSendFailed?.Invoke(this, message);
 
             // 创建并连接虚拟 Xbox 360 控制器
             _virtualController = _vigemClient.CreateXbox360Controller();
@@ -79,6 +105,27 @@ namespace MiGamepad.Core.Devices
         {
             // ViGEm 反馈的马达强度为 0~255 (LargeMotor / SmallMotor)
             _rumbleEngine.SetVibration(e.LargeMotor, e.SmallMotor);
+        }
+
+        /// <summary>
+        /// 触发一次手动震动测试 (双马达约 86% 强度持续 1 秒)
+        /// </summary>
+        public void TestRumble()
+        {
+            _rumbleEngine.SetVibration(largeMotor: 220, smallMotor: 220);
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(1000);
+                    _rumbleEngine.SetVibration(0, 0);
+                }
+                catch
+                {
+                    // 引擎可能已随设备释放
+                }
+            });
         }
 
         private async Task ReadLoopAsync()
@@ -137,10 +184,11 @@ namespace MiGamepad.Core.Devices
                 _virtualController.SetButtonState(Xbox360Button.LeftThumb, report.LeftThumb);
                 _virtualController.SetButtonState(Xbox360Button.RightThumb, report.RightThumb);
 
-                // 功能键
+                // 功能键 (MI 键映射 Guide 需系统存在 Game Bar, 否则会触发
+                // “无法打开此 ms-gamebar 链接”弹窗, 见 GamepadSettings)
                 _virtualController.SetButtonState(Xbox360Button.Back, report.Back);
                 _virtualController.SetButtonState(Xbox360Button.Start, report.Start);
-                _virtualController.SetButtonState(Xbox360Button.Guide, report.Guide);
+                _virtualController.SetButtonState(Xbox360Button.Guide, report.Guide && GamepadSettings.MapGuideButton);
 
                 // 十字键
                 _virtualController.SetButtonState(Xbox360Button.Up, report.DPadUp);
@@ -187,6 +235,12 @@ namespace MiGamepad.Core.Devices
             try
             {
                 _deviceHandle.Dispose();
+            }
+            catch { }
+
+            try
+            {
+                _rumbleHandle?.Dispose();
             }
             catch { }
 

@@ -17,6 +17,18 @@ namespace MiGamepad.Tests
         }
 
         [Fact]
+        public void EnumerateGamepads_Test()
+        {
+            var paths = Win32Hid.EnumerateXiaomiGamepads();
+            _output.WriteLine($"Found {paths.Count} devices:");
+            foreach (var p in paths)
+            {
+                _output.WriteLine($"  Path: {p}");
+                _output.WriteLine($"  Instance: {Win32Hid.DevicePathToInstanceId(p)}");
+            }
+        }
+
+        [Fact]
         public void TestHidHideService()
         {
             try

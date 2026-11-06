@@ -9,6 +9,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- 版本需与 Nefarius 组件带入的 10.x Microsoft.Extensions.* 链对齐, 否则 IServiceCollection 类型身份分裂导致扩展方法解析失败 -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 内嵌官方驱动安装器, 安装服务时检测缺失并静默安装 (详见 Drivers\LICENSES-THIRD-PARTY.txt) -->
+    <EmbeddedResource Include="Drivers\ViGEmBus_1.22.0_x64_x86_arm64.exe" />
+    <EmbeddedResource Include="Drivers\HidHide_1.5.230_x64.exe" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\MiGamepad.Core\MiGamepad.Core.csproj" />
   </ItemGroup>
 

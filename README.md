@@ -47,7 +47,32 @@ dotnet run --project .\src\MiGamepad.App\MiGamepad.App.csproj
 * **按 `C` 键**：清屏并重新显示状态看板。
 * **按 `Ctrl + C`**：安全注销虚拟手柄并退出。
 
-### 4. 卸载底层驱动
+### 4. 部署为 Windows 常驻服务 (推荐日常使用, 开机自启)
+
+打包便携单文件 exe (自包含运行时与官方驱动安装器, 换电脑免装 .NET、免联网):
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\Publish-Portable.ps1
+```
+产物在 `dist\` 目录。
+
+在目标电脑上 (管理员 PowerShell, **一条命令完成全部**):
+```powershell
+.\MiGamepad.App.exe --install
+```
+`--install` 自动依次: 检测并静默安装缺失的 ViGEmBus/HidHide 驱动 (官方安装器内嵌于 exe) →
+部署到 `C:\Program Files\MiGamepad\` → 注册并启动服务。
+
+其他命令:
+```powershell
+.\MiGamepad.App.exe --uninstall         # 卸载服务 (驱动与安装目录保留)
+.\MiGamepad.App.exe --install-drivers   # 仅安装底层驱动
+# 升级: 用新版 exe 重新执行一次 --install 即可 (自动停旧服务、覆盖文件、重启)
+```
+服务特性: 开机自动运行 (早于登录) / 崩溃自动重启 (5s→10s→60s) / 断手柄自愈重连。
+运行日志: `%ProgramData%\MiGamepad\service.log`。
+注意: 服务与交互模式互斥 (单实例保护), 手动测试前先 `sc stop MiGamepad`。
+
+### 5. 卸载底层驱动
 若需要清理或重新测试安装流程，以**管理员身份**运行卸载脚本：
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\Uninstall-Drivers.ps1
@@ -66,12 +91,14 @@ powershell -ExecutionPolicy Bypass -File .\tools\Uninstall-Drivers.ps1
 
 ```text
 MiGamepad/
-├── DESIGN.md                        # 系统架构与通信协议逆向设计文档
+├── DESIGN.md                        # 系统架构与通信协议逆向设计文档 (含真机实测修订)
 ├── README.md                        # 项目说明与上手指南
 ├── MiGamepad.sln                    # 解决方案文件
+├── docs/
+│   └── architecture-original.md     # 最初设计稿存档 (字节偏移表以 DESIGN.md 为准)
 ├── src/
 │   ├── MiGamepad.Core/              # 核心业务库 (net8.0-windows)
-│   │   ├── Native/                  # Win32 HID API (设备发现、句柄管理)
+│   │   ├── Native/                  # Win32 HID API (设备发现、句柄管理、caps 查询)
 │   │   ├── Protocol/                # 21字节报文解码、死区处理、震动引擎
 │   │   ├── Devices/                 # 单手柄管理 (XiaomiGamepad 状态机)
 │   │   ├── Cloaking/                # HidHide 白名单与物理设备隐藏服务
@@ -80,6 +107,8 @@ MiGamepad/
 ├── tests/
 │   └── MiGamepad.Tests/             # 自动化单元测试 (按键、轴死区、报文验证)
 └── tools/
+    ├── MiGamepad.Diag/              # HID 通信诊断工具 (震动通路探测 / 输入流监听)
+    ├── Publish-Portable.ps1         # 便携单文件 exe 发布脚本 (dist/)
     ├── Install-Drivers.ps1          # ViGEmBus 与 HidHide 一键依赖安装脚本
     └── Uninstall-Drivers.ps1        # 底层驱动一键卸载清理脚本
 ```

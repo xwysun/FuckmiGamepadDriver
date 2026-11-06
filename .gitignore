@@ -3,3 +3,6 @@ obj/
 *.user
 .vs/
 TestResults/
+
+# 发布产物
+dist/

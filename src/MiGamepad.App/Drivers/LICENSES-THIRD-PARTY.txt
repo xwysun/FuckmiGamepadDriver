@@ -1,0 +1,18 @@
+第三方驱动安装包说明
+====================
+
+本目录下的安装器二进制文件从官方 GitHub Release 原样分发, 未做任何修改:
+
+1. ViGEmBus_1.22.0_x64_x86_arm64.exe
+   来源: https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe
+   项目: Nefarius Virtual Gamepad Emulation Bus Driver
+   许可: BSD-3-Clause (详见上游仓库 LICENSE)
+
+2. HidHide_1.5.230_x64.exe
+   来源: https://github.com/nefarius/HidHide/releases/download/v1.5.230.0/HidHide_1.5.230_x64.exe
+   项目: Nefarius HidHide (Gaming Input Hiding Filter Driver)
+   许可: MIT (详见上游仓库 LICENSE)
+
+本程序作为这两个驱动的前端调用其官方安装器 (/passive /norestart 静默安装),
+不修改、不重打包驱动内容。升级驱动版本时替换对应文件并同步修改
+DriverInstaller.cs 与 MiGamepad.App.csproj 中的资源名即可。
