@@ -1,161 +1,140 @@
-# MiGamepad - 小米蓝牙手柄 Windows 11 XInput 虚拟驱动
+# 🎮 MiGamepad — 小米蓝牙手柄 Windows XInput 驱动服务
 
-本项目是专为**小米蓝牙手柄（型号：MDZ-11-AA）**量身打造的 Windows 11 原生 Xbox 360 控制器映射驱动与守护程序。
+让 **小米蓝牙手柄（MDZ-11-AA）** 在 Windows 10 / 11 上变身**原生 Xbox 360 控制器**：所有现代 PC 游戏（Steam、Xbox Game Pass、EA App、Epic……）即插即玩，支持双线性马达震动，且不与 Xbox / PS / Switch 手柄冲突。
 
----
-
-## 🌟 核心特性
-
-1. **虚拟 Xbox 360 控制器（XInput 协议）**：
-   - 彻底摆脱老旧 DirectInput 兼容性差的问题，所有现代 PC 游戏（Steam、Xbox Game Pass、EA App、Epic 等）即插即玩。
-2. **多手柄稳定共存（支持 4 手柄同台）**：
-   - 支持**小米手柄与官方 Xbox 手柄、PS5/PS4 手柄、Switch Pro 手柄同时连接并共用**进行本地多人联机（如《双人成行》、《胡闹厨房》、《FC 24》等）。
-   - 独立分配 XInput 槽位（Player 1 ~ 4），各手柄按键与震动互不干扰。
-3. **彻底杜绝“双重输入 / 幽灵手柄”（HidHide 深度集成）**：
-   - 自动调用 `HidHide` 内核过滤驱动，向系统和所有游戏进程隐匿小米手柄的原生 DirectInput 物理节点，仅放行虚拟的 Xbox 360 设备，彻底解决“按一次跳两下”或“识别出多余玩家”的痛点。
-4. **原生双无极马达触觉震动反馈（Rumble）**：
-   - 监听 XInput 震动事件，经**30Hz 脏检查限流器**转换为小米专有 HID 特征报文（`0x20`），不丢包、不卡顿、不打爆蓝牙信道。
-5. **蓝牙休眠唤醒自愈与热插拔**：
-   - 手柄闲置 5 分钟断电休眠后，再次按下 MI 键即可秒级自动重新绑定虚拟 Xbox 设备，无需重启游戏或重新打开软件。
-6. **蓝牙回连卡死自动修复（蓝牙自愈）**：
-   - 部分老款蓝牙适配器驱动（如 某老款蓝牙适配器 的 2013 年版驱动）在手柄断连后无法重建 HID 数据通道，
-     表现为手柄呼吸灯常闪、系统显示“已连接”但没有任何输入。程序通过监测 HID 接口节点的**闪断特征**识别该状态，
-     自动删除死配对并尝试无界面重新配对（必要时自动弹出系统“添加设备”页，点击一下手柄即可）。
-   - 可通过配置文件 `AutoRepairBluetooth=off` 关闭。
-7. **Win11 ms-gamebar 弹窗抑制**：
-   - Windows 11 在虚拟 Xbox 控制器接入时会自发尝试激活 `ms-gamebar:` 协议，未安装 Xbox Game Bar 的系统
-     （LTSC、精简版）会弹出“需要新应用打开 ms-gamebar”对话框。程序自动写入 `NoOpenWith` 注册表抑制该弹窗，
-     不影响已安装 Game Bar 系统的正常使用。可通过配置文件 `SuppressGameBarPopup=off` 关闭。
-8. **中心 MI 徽标键映射**：
-   - 将手柄中央 MI 键映射为 Xbox Guide 键，一键唤起 Windows 11 的 Xbox Game Bar（游戏工具栏）。
-   - 仅当系统真正注册了 ms-gamebar 协议处理器时启用（auto 模式自动检测，LTSC 等系统自动关闭）。
+一个 exe，双击即完成全部安装——内嵌官方驱动安装器，**无需安装 .NET、无需联网**。
 
 ---
 
-## 🚀 快速上手与测试流程
+## ✨ 功能特性
 
-### 1. 安装底层驱动
-以**管理员身份**打开 PowerShell，运行项目内置的驱动安装脚本：
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\Install-Drivers.ps1
-```
-> 该脚本会自动检测并下载安装由微软数字签名的 `ViGEmBus`（虚拟手柄总线）和 `HidHide`（设备隐藏过滤驱动）。
-
-### 2. 小米手柄蓝牙配对
-1. 按下手柄正中间的 **MI 徽标键** 开机。
-2. 若未配对，长按 MI 键直到指示灯**快速双闪**进入蓝牙配对模式。
-3. 打开 Win11 设置 -> **蓝牙和其他设备** -> **添加设备** -> **蓝牙**。
-4. 选择并连接 **"Xiaomi Bluetooth Wireless Gamepad"**。
-
-### 3. 运行程序
-启动服务：
-```powershell
-dotnet run --project .\src\MiGamepad.App\MiGamepad.App.csproj
-```
-启动后程序会自动扫描并接管已连接的小米手柄，在终端中实时显示设备状态与电量。
-* **按 `V` 键**：触发当前已连接手柄震动测试（1秒）。
-* **按 `C` 键**：清屏并重新显示状态看板。
-* **按 `Ctrl + C`**：安全注销虚拟手柄并退出。
-
-### 4. 部署为 Windows 常驻服务 (推荐日常使用, 开机自启)
-
-打包便携单文件 exe (自包含运行时与官方驱动安装器, 换电脑免装 .NET、免联网):
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\Publish-Portable.ps1
-```
-产物在 `dist\` 目录。
-
-在目标电脑上 (管理员 PowerShell, **一条命令完成全部**):
-```powershell
-.\MiGamepad.App.exe --install
-```
-`--install` 自动依次: 检测并静默安装缺失的 ViGEmBus/HidHide 驱动 (官方安装器内嵌于 exe) →
-部署到 `C:\Program Files\MiGamepad\` → 注册并启动服务。
-
-其他命令:
-```powershell
-.\MiGamepad.App.exe --uninstall         # 卸载服务 (驱动与安装目录保留)
-.\MiGamepad.App.exe --install-drivers   # 仅安装底层驱动
-# 升级: 用新版 exe 重新执行一次 --install 即可 (自动停旧服务、覆盖文件、重启)
-```
-服务特性: 开机自动运行 (早于登录) / 崩溃自动重启 (5s→10s→60s) / 断手柄自愈重连。
-运行日志: `%ProgramData%\MiGamepad\service.log`。
-注意: 服务与交互模式互斥 (单实例保护), 手动测试前先 `sc stop MiGamepad`。
-
-### 5. 卸载底层驱动
-若需要清理或重新测试安装流程，以**管理员身份**运行卸载脚本：
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\Uninstall-Drivers.ps1
-```
+| | 功能 | 说明 |
+|---|---|---|
+| 🕹️ | **原生 XInput 映射** | 彻底摆脱 DirectInput 兼容性差的问题，Steam / Game Pass / EA / Epic 游戏直接识别为 Xbox 360 手柄 |
+| 📳 | **双线性马达震动** | 监听 XInput 震动事件，30Hz 脏检查限流转换为小米专有 HID 特征报文，不丢包、不卡顿、不虚耗电量 |
+| 👥 | **4 手柄同台共存** | 与官方 Xbox、PS5/PS4、Switch Pro 手柄同时使用，本地多人游戏（《双人成行》《胡闹厨房》等）互不干扰 |
+| 👻 | **杜绝"幽灵手柄"** | 集成 HidHide 内核过滤驱动，向游戏隐匿小米手柄原生 DirectInput 节点，按键绝不双发 |
+| 😴 | **休眠秒回连** | 手柄闲置断电休眠后，按下 MI 键即刻自动重新绑定虚拟手柄，无需重启游戏或软件 |
+| 🔧 | **蓝牙回连自愈** | 部分老款蓝牙适配器驱动断连后无法重建 HID 通道（表现为"已连接"但没输入），程序自动检测并修复配对 |
+| 🪟 | **LTSC / 精简版兼容** | 自动抑制 Win11 未装 Xbox Game Bar 时的 `ms-gamebar` 弹窗；MI 徽标键智能映射为 Xbox Guide 键 |
 
 ---
 
-## 🧯 故障排查
+## 🚀 快速开始
 
-### 手柄呼吸灯常闪、显示“已连接”但没有任何输入
+### ① 下载
 
-老款蓝牙适配器驱动的已知故障，实测 某老款蓝牙适配器（蓝牙部分 ）配套
-2013 年版驱动（3.1.1307.360）在 Win11 24H2 上：手柄断电重开后系统秒显示“已连接”，但 HID 数据通道永远建立
-不起来，HID 接口节点以 ~20 秒周期闪断，输入为 0 报文。
+前往 [**Releases**](../../releases) 页面，下载 `MiGamepad.App.exe`（或完整压缩包 `MiGamepad-Portable.zip`）。
 
-- **根治方案（实测有效）**：升级适配器蓝牙驱动到其系列的最终版。老款适配器系列 系列的最终版为
-  **最终版**（2016 WHQL，`BT_最终版_64_Win10.exe`），升级后断电自动回连、输入流全部恢复正常。
-  Intel 已下架该产品页面，可从 [驱动存档站](驱动存档站)
-  等存档站获取。
-- **彻底方案**：更换一个 USB 蓝牙适配器（BT 5.0+，约 30~50 元）。
-- 程序侧的**蓝牙自愈**可作兜底：自动检测闪断 → 删除死配对 → 尝试无界面重配/弹出“添加设备”页。
+> 系统要求：Windows 10（1809+）/ Windows 11，x64，自带蓝牙或 USB 蓝牙适配器。
 
-### 虚拟手柄接入时弹出“需要新应用打开 ms-gamebar”
+### ② 小米手柄进入蓝牙配对
 
-Windows 11 已知问题：未安装 Xbox Game Bar 的系统上，任何 XInput 设备接入都会触发该弹窗（与是否按键无关）。
-程序在启动/安装时自动写入 `NoOpenWith` 注册表值抑制，无需手动处理；如需关闭抑制行为，设置
-`SuppressGameBarPopup=off`。
+1. 按手柄正中间的 **MI 徽标键** 开机；
+2. 若首次使用，**长按 MI 键**直到指示灯**快速双闪**，进入配对模式；
+3. 打开 Windows 设置 → **蓝牙和其他设备** → **添加设备** → 选择 **"Xiaomi Bluetooth Wireless Gamepad"**。
+
+### ③ 双击 `MiGamepad.App.exe`
+
+就这一步。程序会自动：
+
+- 检测并静默安装缺失的 **ViGEmBus / HidHide** 官方驱动（已内嵌于 exe）；
+- 部署到 `C:\Program Files\MiGamepad\`；
+- 注册并启动 Windows 常驻服务，**开机自动运行**。
+
+完成后打开任意游戏即可使用。🎉
+
+> **已安装过？** 再次双击 exe 会打开管理菜单：`[S]` 停止服务进入手动测试模式 · `[U]` 卸载服务。
+
+---
+
+## 🎮 日常使用
+
+装好后**无需任何日常操作**——服务随系统自启（早于用户登录），手柄关机休眠后按下 MI 键即自动回连，热插拔随意。
+
+**日常可用的小工具：**
+
+- **测震动**：双击 exe → 按 `S` 停止服务进入手动测试模式 → 按 `V` 键触发 1 秒震动测试（`Ctrl+C` 退出并恢复服务托管）。
+- **配置文件** `%ProgramData%\MiGamepad\settings.ini`（一般保持默认即可）：
+
+  | 配置项 | 可选值 | 默认 | 说明 |
+  |---|---|---|---|
+  | `MapGuideButton` | `auto` / `on` / `off` | `auto` | MI 徽标键映射为 Xbox Guide 键（唤起 Xbox Game Bar）。`auto` 仅在系统存在 Game Bar 时启用，LTSC 等系统自动关闭 |
+  | `SuppressGameBarPopup` | `auto` / `on` / `off` | `auto` | 抑制虚拟手柄接入时的 `ms-gamebar` "需要新应用" 弹窗。`auto` 仅在未安装 Game Bar 的系统生效 |
+  | `AutoRepairBluetooth` | `on` / `off` | `on` | 蓝牙回连通道损坏时自动删配对并重配（必要时弹出系统"添加设备"页，点一下手柄即可） |
+
+  修改后重启服务生效：`sc stop MiGamepad && sc start MiGamepad`（或直接双击 exe 在菜单中操作）。
+- **运行日志**：`%ProgramData%\MiGamepad\service.log`。
+
+---
+
+## ⌨️ 命令行参考（管理员 PowerShell）
+
+```powershell
+.\MiGamepad.App.exe --install          # 一条命令完成全部安装（等价于双击 exe 首次运行）
+.\MiGamepad.App.exe --uninstall        # 卸载服务（驱动与安装目录保留）
+.\MiGamepad.App.exe --install-drivers  # 仅安装底层驱动，不注册服务
+.\MiGamepad.App.exe --set-guide auto   # 设置 MI 键映射: auto / on / off
+```
+
+- **升级版本**：下载新版 exe 后重新执行一次 `--install` 即可（自动停旧服务 → 覆盖文件 → 重启）。
+- **彻底清理**：先 `--uninstall`，再以管理员运行 [`tools/Uninstall-Drivers.ps1`](./tools/Uninstall-Drivers.ps1) 卸载 ViGEmBus / HidHide 驱动。
+- 服务自带崩溃自动重启（5s → 10s → 60s 退避）与断手柄自愈重连，常驻后台无需看管。
+
+---
+
+## 🧯 常见问题
+
+### 手柄呼吸灯常闪、显示"已连接"但没有任何输入
+
+老款蓝牙适配器驱动的一个已知故障：实测 某老款蓝牙适配器配套 2013 年版驱动在 Win11 24H2 上，手柄断电重开后系统秒显示"已连接"，但 HID 数据通道永远建立不起来，HID 节点以约 20 秒周期闪断。
+
+- **根治**：升级适配器蓝牙驱动到该系列最终版（如 老款适配器系列 系列的 **最终版**，2016 WHQL），升级后实测完全恢复。Intel 已下架产品页，可从 [驱动存档站](驱动存档站) 获取。
+- **彻底**：更换一个 BT 5.0+ USB 蓝牙适配器（约 30~50 元）。
+- **兜底**：程序内置蓝牙自愈会自动检测此状态并尝试重配（`AutoRepairBluetooth` 默认开启）。
+
+### 接入手柄时弹出"需要新应用打开 ms-gamebar"
+
+Windows 11 已知问题：未安装 Xbox Game Bar 的系统上，任何 XInput 设备接入都会触发该弹窗。程序启动时已自动写入注册表抑制，无需手动处理（如需关闭：`SuppressGameBarPopup=off`）。
 
 ### 按键双重输入 / 游戏识别出两个手柄
 
-物理手柄未被执行 HidHide 隐藏（程序异常退出可能遗留规则或未完成隐藏）。重启服务即可（启动时会自动清理
-遗留规则并按当前连接重新隐藏）；确认 HidHide 已安装。
+物理手柄未被执行 HidHide 隐藏（程序异常退出可能遗留规则）。重启服务即可——启动时会自动清理遗留规则并按当前连接重新隐藏；同时确认 HidHide 已安装（可用 `--install-drivers` 补装）。
 
 ---
 
-## 🛠️ 技术架构与设计方案
-
-详细技术架构图、21字节 HID 报文逆向说明与协议分析请查阅项目根目录下的设计文档：
-👉 **[DESIGN.md](./DESIGN.md)**
-
----
-
-## 📂 项目结构
-
-```text
-MiGamepad/
-├── DESIGN.md                        # 系统架构与通信协议逆向设计文档 (含真机实测修订)
-├── README.md                        # 项目说明与上手指南
-├── MiGamepad.sln                    # 解决方案文件
-├── docs/
-│   └── architecture-original.md     # 最初设计稿存档 (字节偏移表以 DESIGN.md 为准)
-├── src/
-│   ├── MiGamepad.Core/              # 核心业务库 (net8.0-windows)
-│   │   ├── Native/                  # Win32 HID API (设备发现、句柄管理、caps 查询)
-│   │   ├── Protocol/                # 21字节报文解码、死区处理、震动引擎
-│   │   ├── Devices/                 # 单手柄管理 (XiaomiGamepad 状态机)
-│   │   ├── Cloaking/                # HidHide 白名单与物理设备隐藏服务
-│   │   └── GamepadManager.cs        # 全局多设备监控与 XInput 槽位分配
-│   └── MiGamepad.App/               # 桌面应用 / 控制台控制面板 (net8.0-windows)
-├── tests/
-│   └── MiGamepad.Tests/             # 自动化单元测试 (按键、轴死区、报文验证)
-└── tools/
-    ├── MiGamepad.Diag/              # HID 通信诊断工具 (震动通路探测 / 输入流监听)
-    ├── Publish-Portable.ps1         # 便携单文件 exe 发布脚本 (dist/)
-    ├── Install-Drivers.ps1          # ViGEmBus 与 HidHide 一键依赖安装脚本
-    └── Uninstall-Drivers.ps1        # 底层驱动一键卸载清理脚本
-```
-
----
-
-## 🧪 运行单元测试
+<details>
+<summary><b>🛠️ 从源码构建（开发者）</b></summary>
 
 ```powershell
-dotnet test
+dotnet build                        # 构建
+dotnet test                         # 运行 13 项单元测试（报文校验 / 按键解码 / 摇杆死区标定等）
+powershell -ExecutionPolicy Bypass -File .\tools\Publish-Portable.ps1
+                                    # 打包自包含单文件 exe + 内嵌驱动安装器，产物在 dist\
+dotnet run --project .\src\MiGamepad.App\MiGamepad.App.csproj   # 交互模式直接跑
 ```
-通过 13 项单元测试，覆盖报文头校验、按键解码、D-Pad 8方向切换、摇杆反转与死区非线性标定等核心算法。
+
+技术架构图、21 字节 HID 输入报文与 7 字节震动特征报文的协议逆向分析，见 👉 **[DESIGN.md](./DESIGN.md)**。
+
+</details>
+
+---
+
+## 🙏 致谢
+
+本项目站在以下优秀开源项目的肩膀上，特此致谢：
+
+- **[irungentoo/Xiaomi_gamepad](https://github.com/irungentoo/Xiaomi_gamepad)** —— 小米手柄 HID 协议逆向的开创性工作。本项目输入报文解析与震动特征报文（`0x20`）的实现均以此为参考起点。
+- **[Nefarius / ViGEmBus](https://github.com/nefarius/ViGEmBus)** —— 虚拟游戏手柄总线驱动（BSD-3-Clause），本项目虚拟 Xbox 360 控制器的基石。驱动安装器 `v1.22.0` 内嵌于发行文件中。
+- **[Nefarius / HidHide](https://github.com/nefarius/HidHide)** —— 游戏输入隐藏过滤驱动（MIT），解决"幽灵手柄"双发问题的核心。驱动安装器 `v1.5.230` 内嵌于发行文件中。
+- **[Nefarius.Drivers.HidHide](https://www.nuget.org/packages/Nefarius.Drivers.HidHide) / [Nefarius.ViGEm.Client](https://www.nuget.org/packages/Nefarius.ViGEm.Client)**（NuGet）—— 上述两个驱动的 .NET 客户端库。
+- **[Microsoft .NET 8](https://dotnet.microsoft.com/)** —— 运行时与 Windows 服务托管框架。
+
+> 内嵌驱动安装器均从官方 GitHub Release 原样分发、未做修改，条款详见 [`src/MiGamepad.App/Drivers/LICENSES-THIRD-PARTY.txt`](./src/MiGamepad.App/Drivers/LICENSES-THIRD-PARTY.txt)。
+
+---
+
+## 📄 许可证
+
+本项目基于 [MIT License](./LICENSE) 开源发布。
+内嵌的 ViGEmBus / HidHide 驱动安装器遵循其各自上游许可证，见上方第三方许可说明。
