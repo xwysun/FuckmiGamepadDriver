@@ -188,7 +188,27 @@ namespace MiGamepad.App
 
             PrintBanner();
 
+            // 未安装 Game Bar 的系统上, 虚拟手柄接入会触发 “需要新应用打开 ms-gamebar” 弹窗;
+            // 非管理员交互运行时写 HKCU 兜底
+            if (GameBarSuppressor.EnsureSuppressed(out string gameBarSummary))
+            {
+                Console.WriteLine($"[GameBar] {gameBarSummary}");
+            }
+
             _manager = new GamepadManager();
+            _manager.DiagnosticLog = msg =>
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [蓝牙自愈] {msg}");
+                Console.ResetColor();
+            };
+
+            // 蓝牙自愈删除配对后直接打开系统“添加设备”页, 用户点一下手柄即可完成重配
+            BluetoothRecovery.PairingUiLauncher = () =>
+            {
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("ms-settings:bluetooth") { UseShellExecute = true });
+            };
 
             // 先挂载事件监听器，避免首次扫描时遗漏连接事件
             _manager.GamepadConnected += OnGamepadConnected;

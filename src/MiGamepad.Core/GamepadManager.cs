@@ -24,6 +24,9 @@ namespace MiGamepad.Core
 
         public IReadOnlyCollection<XiaomiGamepad> ConnectedGamepads => _gamepads.Values.ToList();
 
+        /// <summary>上层注入的诊断日志出口 (服务模式写 service.log, 交互模式写控制台)</summary>
+        public Action<string>? DiagnosticLog { get; set; }
+
         public event EventHandler<XiaomiGamepad>? GamepadConnected;
         public event EventHandler<XiaomiGamepad>? GamepadDisconnected;
 
@@ -47,6 +50,9 @@ namespace MiGamepad.Core
         {
             // 1. 初始化 HidHide 屏蔽驱动
             _hidHideManager = new HidHideManager();
+
+            // 清理历史会话遗留的屏蔽规则 (异常退出时 uncloak 不会执行, 旧规则会挡住游戏侧)
+            _hidHideManager.RemoveStaleXiaomiRules();
 
             // 2. 初始化 ViGEm 虚拟总线客户端
             try
@@ -80,10 +86,7 @@ namespace MiGamepad.Core
             {
                 try
                 {
-                    if (_vigemClient != null)
-                    {
-                        ScanDevices();
-                    }
+                    ScanDevices();
                 }
                 catch (Exception ex)
                 {
@@ -104,10 +107,23 @@ namespace MiGamepad.Core
 
         private void ScanDevices()
         {
-            if (_vigemClient == null) return;
-
             var detectedPaths = Win32Hid.EnumerateXiaomiGamepads();
             var now = DateTime.UtcNow;
+
+            // 蓝牙回连卡死检测与自动修复 (不依赖 ViGEm, 适配器故障的机器也能自愈):
+            // 已配对但 HID 接口长时间不出现 -> 删除配对并无界面重配
+            try
+            {
+                bool hidPresent = detectedPaths.Count > 0;
+                BluetoothRecovery.CheckAndRepair(hidPresent, DiagnosticLog);
+                BluetoothRecovery.CheckPendingRepair(hidPresent, DiagnosticLog);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GamepadManager] 蓝牙修复检查异常: {ex.Message}");
+            }
+
+            if (_vigemClient == null) return;
 
             // 清理已消失设备的去抖记录
             foreach (var stalePath in _pendingDevices.Keys.Where(p => !detectedPaths.Contains(p)).ToList())
@@ -136,15 +152,6 @@ namespace MiGamepad.Core
 
                 if ((now - firstSeen).TotalSeconds < StableSecondsBeforeConnect)
                 {
-                    continue;
-                }
-
-                // 链路探活: 已配对但未连接的手柄虽然节点存在, 读取会报 1167,
-                // 此时不创建虚拟手柄 (否则会出现“日志说已连接, 指示灯却还在闪”)
-                if (!Win32Hid.IsDeviceLinkUp(path))
-                {
-                    // 保持等待状态, 等蓝牙链路真正建立后再接入
-                    _pendingDevices[path] = now;
                     continue;
                 }
 

@@ -157,6 +157,12 @@ namespace MiGamepad.App
             Console.WriteLine($"配置文件: {MiGamepad.Core.Configuration.GamepadSettings.SettingsFilePath} " +
                               $"(MI 键: {MiGamepad.Core.Configuration.GamepadSettings.ConfiguredGuideMode})");
 
+            // 抑制 Win11 在虚拟手柄接入时自发弹出的 “需要新应用打开 ms-gamebar” 对话框
+            if (MiGamepad.Core.GameBarSuppressor.EnsureSuppressed(out string gameBarSummary))
+            {
+                Console.WriteLine($"已抑制 ms-gamebar 弹窗 ({gameBarSummary})");
+            }
+
             Console.WriteLine();
             if (!alreadyInstalled)
             {

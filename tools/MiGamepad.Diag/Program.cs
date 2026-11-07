@@ -81,7 +81,7 @@ namespace MiGamepad.Diag
             // --input 模式: 只监听按键原始报文并解码 (排查按键映射/触点问题)
             if (inputOnly)
             {
-                return await RunInputCapture(20);
+                return await RunInputCapture(90);
             }
 
             Console.WriteLine("==================================================================");
@@ -205,67 +205,77 @@ namespace MiGamepad.Diag
             return 0;
         }
 
-        /// <summary>纯输入监听: 打印每个报文的按键位解码, 用于排查按键映射与触点老化</summary>
+        /// <summary>
+        /// 纯输入监听 (断线自愈重试式): 蓝牙手柄闪断时设备实例会重建 (实例号 &N 递增),
+        /// 读取失败后自动重新枚举并再次打开, 在总窗口期内持续统计报文
+        /// </summary>
         private static async Task<int> RunInputCapture(int seconds)
         {
-            var paths = Win32Hid.EnumerateXiaomiGamepads();
-            if (paths.Count == 0)
-            {
-                Console.WriteLine("[X] 未发现小米手柄。");
-                return 1;
-            }
-
-            Console.WriteLine($"[输入捕获] {seconds} 秒, 请依次轻按/重按 X 与 Y (也欢迎按其他键对比)...");
-            using var handle = Win32Hid.OpenDevice(paths[0]);
-            if (handle.IsInvalid)
-            {
-                Console.WriteLine($"[X] 打开失败: Win32 错误 {Marshal.GetLastWin32Error()}");
-                return 1;
-            }
-
-            using var stream = new FileStream(handle, FileAccess.Read, 64, isAsync: true);
+            Console.WriteLine($"[输入捕获] {seconds} 秒 (断线自动重连), 请持续按动按键/摇杆...");
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
             byte[] buffer = new byte[64];
             var sw = Stopwatch.StartNew();
+            int sessions = 0;
+            int reconnects = 0;
 
-            try
+            while (!cts.IsCancellationRequested)
             {
-                while (!cts.IsCancellationRequested)
+                var paths = Win32Hid.EnumerateXiaomiGamepads();
+                if (paths.Count == 0)
                 {
-                    int n = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cts.Token);
-                    if (n <= 0) break;
-                    if (n < 21 || buffer[0] != 0x04) continue;
+                    await Task.Delay(1500, cts.Token);
+                    continue;
+                }
 
-                    byte b1 = buffer[1], b2 = buffer[2];
-                    var sb = new StringBuilder();
-                    if ((b1 & 0x01) != 0) sb.Append("A ");
-                    if ((b1 & 0x02) != 0) sb.Append("B ");
-                    if ((b1 & 0x04) != 0) sb.Append("?(b1:04) ");
-                    if ((b1 & 0x08) != 0) sb.Append("X ");
-                    if ((b1 & 0x10) != 0) sb.Append("Y ");
-                    if ((b1 & 0x20) != 0) sb.Append("?(b1:20) ");
-                    if ((b1 & 0x40) != 0) sb.Append("LB ");
-                    if ((b1 & 0x80) != 0) sb.Append("RB ");
-                    if ((b2 & 0x01) != 0) sb.Append("?(b2:01) ");
-                    if ((b2 & 0x02) != 0) sb.Append("?(b2:02) ");
-                    if ((b2 & 0x04) != 0) sb.Append("Back ");
-                    if ((b2 & 0x08) != 0) sb.Append("Start ");
-                    if ((b2 & 0x10) != 0) sb.Append("?(b2:10) ");
-                    if ((b2 & 0x20) != 0) sb.Append("LS ");
-                    if ((b2 & 0x40) != 0) sb.Append("RS ");
-                    if ((b2 & 0x80) != 0) sb.Append("?(b2:80) ");
-                    if (sb.Length == 0) sb.Append("-");
+                using var handle = Win32Hid.OpenDevice(paths[0]);
+                if (handle.IsInvalid)
+                {
+                    await Task.Delay(1500, cts.Token);
+                    continue;
+                }
 
-                    Console.WriteLine(
-                        $"[{sw.Elapsed.TotalSeconds,6:F2}s] b1={b1:X2} b2={b2:X2} dpad={buffer[4]:X} " +
-                        $"LX={buffer[5]:X2} LY={buffer[6]:X2} RX={buffer[7]:X2} RY={buffer[8]:X2} " +
-                        $"LT={buffer[11]:X2} RT={buffer[12]:X2} bat={buffer[19]} => {sb}");
+                sessions++;
+                try
+                {
+                    using var stream = new FileStream(handle, FileAccess.Read, 64, isAsync: true);
+                    while (!cts.IsCancellationRequested)
+                    {
+                        int n = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cts.Token);
+                        if (n <= 0) break;
+                        if (n < 21 || buffer[0] != 0x04) continue;
+                        _inputTotal++;
+
+                        byte b1 = buffer[1], b2 = buffer[2];
+                        var sb = new StringBuilder();
+                        if ((b1 & 0x01) != 0) sb.Append("A ");
+                        if ((b1 & 0x02) != 0) sb.Append("B ");
+                        if ((b1 & 0x04) != 0) sb.Append("?(b1:04) ");
+                        if ((b1 & 0x08) != 0) sb.Append("X ");
+                        if ((b1 & 0x10) != 0) sb.Append("Y ");
+                        if ((b1 & 0x20) != 0) sb.Append("?(b1:20) ");
+                        if ((b1 & 0x40) != 0) sb.Append("LB ");
+                        if ((b1 & 0x80) != 0) sb.Append("RB ");
+                        if ((b2 & 0x04) != 0) sb.Append("Back ");
+                        if ((b2 & 0x08) != 0) sb.Append("Start ");
+                        if ((b2 & 0x20) != 0) sb.Append("LS ");
+                        if ((b2 & 0x40) != 0) sb.Append("RS ");
+                        if (sb.Length == 0) sb.Append("-");
+
+                        Console.WriteLine(
+                            $"[{sw.Elapsed.TotalSeconds,6:F2}s] b1={b1:X2} b2={b2:X2} dpad={buffer[4]:X} " +
+                            $"LX={buffer[5]:X2} LY={buffer[6]:X2} RX={buffer[7]:X2} RY={buffer[8]:X2} " +
+                            $"LT={buffer[11]:X2} RT={buffer[12]:X2} bat={buffer[19]} => {sb}");
+                    }
+                }
+                catch (OperationCanceledException) { break; }
+                catch (IOException)
+                {
+                    reconnects++;
+                    Console.WriteLine($"[{sw.Elapsed.TotalSeconds,6:F2}s] 输入流中断, 自动重试...");
                 }
             }
-            catch (OperationCanceledException) { }
-            catch (IOException) { }
 
-            Console.WriteLine("[输入捕获] 结束。");
+            Console.WriteLine($"[输入捕获] 结束。共 {sessions} 个会话, {reconnects} 次断线, 累计输入报文 {_inputTotal}。");
             return 0;
         }
 

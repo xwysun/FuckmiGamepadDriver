@@ -4,6 +4,8 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Win32.SafeHandles;
 
 namespace MiGamepad.Core.Native
@@ -66,14 +68,34 @@ namespace MiGamepad.Core.Native
         [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
         private static extern IntPtr SetupDiGetClassDevs(ref Guid classGuid, IntPtr enumerator, IntPtr hwndParent, uint flags);
 
+        [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern IntPtr SetupDiGetClassDevs(IntPtr classGuid, string enumerator, IntPtr hwndParent, uint flags);
+
         [DllImport("setupapi.dll", SetLastError = true)]
-        private static extern bool SetupDiEnumDeviceInterfaces(IntPtr deviceInfoSet, IntPtr deviceInfoData, ref Guid interfaceClassGuid, uint memberIndex, ref SP_DEVICE_INTERFACE_DATA deviceInterfaceData);
+        private static extern bool SetupDiEnumDeviceInterfaces(IntPtr deviceInfoSet, IntPtr deviceInfoData, ref Guid classGuid, uint memberIndex, ref SP_DEVICE_INTERFACE_DATA deviceInterfaceData);
 
         [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
         private static extern bool SetupDiGetDeviceInterfaceDetail(IntPtr deviceInfoSet, ref SP_DEVICE_INTERFACE_DATA deviceInterfaceData, IntPtr deviceInterfaceDetailData, int deviceInterfaceDetailDataSize, out int requiredSize, IntPtr deviceInfoData);
 
         [DllImport("setupapi.dll", SetLastError = true)]
         private static extern bool SetupDiDestroyDeviceInfoList(IntPtr deviceInfoSet);
+
+        private const uint DIGCF_ALLCLASSES = 0x00000004;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SP_DEVINFO_DATA
+        {
+            public int cbSize;
+            public Guid classGuid;
+            public int devInst;
+            public IntPtr reserved;
+        }
+
+        [DllImport("setupapi.dll", SetLastError = true)]
+        private static extern bool SetupDiEnumDeviceInfo(IntPtr deviceInfoSet, uint memberIndex, ref SP_DEVINFO_DATA deviceInfoData);
+
+        [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        private static extern bool SetupDiGetDeviceInstanceId(IntPtr deviceInfoSet, ref SP_DEVINFO_DATA deviceInfoData, StringBuilder deviceInstanceId, int deviceInstanceIdSize, out int requiredSize);
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         private static extern SafeFileHandle CreateFile(
@@ -239,6 +261,91 @@ namespace MiGamepad.Core.Native
         }
 
         /// <summary>
+        /// 枚举蓝牙层 (BTHENUM) 上已配对小米手柄的服务节点。
+        /// 配对存在时这些节点持续可见 (与手柄是否在线无关), 用于识别
+        /// “已配对但 HID 接口层始终不出现”的回连卡死状态。
+        /// 返回 (实例 ID, 蓝牙 MAC) 列表。
+        /// </summary>
+        public static List<(string InstanceId, ulong Address)> EnumeratePairedXiaomiBluetoothNodes()
+        {
+            var results = new List<(string, ulong)>();
+            const string bthEnumerator = "BTHENUM";
+
+            IntPtr deviceInfoSet = SetupDiGetClassDevs(IntPtr.Zero, bthEnumerator, IntPtr.Zero, DIGCF_PRESENT | DIGCF_ALLCLASSES);
+            if (deviceInfoSet == IntPtr.Zero || deviceInfoSet == (IntPtr)(-1))
+            {
+                return results;
+            }
+
+            try
+            {
+                var infoData = new SP_DEVINFO_DATA();
+                infoData.cbSize = Marshal.SizeOf(infoData);
+
+                uint index = 0;
+                while (SetupDiEnumDeviceInfo(deviceInfoSet, index++, ref infoData))
+                {
+                    var buffer = new StringBuilder(512);
+                    if (!SetupDiGetDeviceInstanceId(deviceInfoSet, ref infoData, buffer, buffer.Capacity, out _))
+                    {
+                        continue;
+                    }
+
+                    string instanceId = buffer.ToString();
+                    // 服务节点形如 BTHENUM\{00001124-...}_VID&00022717_PID&3144\8&00000000&0&001122334455_C00000000;
+                    // 根节点 BTHENUM\DEV_<MAC>\... 不携带 VID&PID, 故从服务节点实例串提取 MAC
+                    if (!instanceId.Contains("VID&00022717_PID&3144", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (TryExtractBluetoothAddress(instanceId, out ulong address))
+                    {
+                        results.Add((instanceId, address));
+                    }
+                }
+            }
+            finally
+            {
+                SetupDiDestroyDeviceInfoList(deviceInfoSet);
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// 从 BTHENUM 服务节点实例 ID 提取蓝牙 MAC 地址。
+        /// 实例后缀形如 8&00000000&amp;0&amp;001122334455_C00000000:
+        /// 最后一个 &amp; 与 _ 之间的 12 位十六进制即为 MAC (直观字节序 00:11:22:33:44:55)。
+        /// 蓝牙地址结构按小端 ulong 存储, 因此低位字节在前。
+        /// </summary>
+        private static bool TryExtractBluetoothAddress(string instanceId, out ulong address)
+        {
+            address = 0;
+            var match = Regex.Match(instanceId, @"&([0-9A-Fa-f]{12})_");
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            string hex = match.Groups[1].Value;
+            try
+            {
+                ulong parsed = 0;
+                for (int i = 0; i < 6; i++)
+                {
+                    parsed |= (ulong)Convert.ToByte(hex.Substring(10 - i * 2, 2), 16) << (i * 8);
+                }
+                address = parsed;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// 打开小米手柄的 HID 设备句柄（支持异步重叠 I/O）
         /// </summary>
         public static SafeFileHandle OpenDevice(string devicePath, bool exclusive = false)
@@ -310,51 +417,6 @@ namespace MiGamepad.Core.Native
             finally
             {
                 probe.Dispose();
-            }
-        }
-
-        /// <summary>
-        /// 探测设备链路是否真正可用。
-        /// 蓝牙手柄“已配对但未连接”时, HID 设备节点依然存在且可打开, 但读取会立刻返回
-        /// ERROR_DEVICE_NOT_CONNECTED(1167)。通过一次带短超时的读来区分:
-        ///   读到数据 / 超时   -> 链路通 (空闲手柄本来就不发数据)
-        ///   读失败(1167 等)   -> 链路断开
-        /// 返回 false 时调用方不应创建虚拟手柄, 避免误报“已连接”并反复重连。
-        /// </summary>
-        public static bool IsDeviceLinkUp(string devicePath, int timeoutMs = 300)
-        {
-            SafeFileHandle handle = OpenDevice(devicePath);
-            if (handle.IsInvalid)
-            {
-                // 被 HidHide 屏蔽(5) 时设备可能仍在, 不据此判死
-                return Marshal.GetLastWin32Error() == 5;
-            }
-
-            try
-            {
-                using var stream = new FileStream(handle, FileAccess.Read, 64, isAsync: true);
-                using var cts = new CancellationTokenSource(timeoutMs);
-                var buffer = new byte[64];
-
-                try
-                {
-                    int read = stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cts.Token)
-                        .AsTask().GetAwaiter().GetResult();
-                    return read > 0;
-                }
-                catch (OperationCanceledException)
-                {
-                    // 超时未收到数据: 空闲但链路正常
-                    return true;
-                }
-                catch (IOException)
-                {
-                    return false;
-                }
-            }
-            finally
-            {
-                handle.Dispose();
             }
         }
 

@@ -21,6 +21,17 @@ namespace MiGamepad.App
             try
             {
                 _manager = new GamepadManager();
+                _manager.DiagnosticLog = ServiceLog.Write;
+
+                // 蓝牙自愈删除配对后, 把“添加设备”页弹到当前登录用户的桌面
+                MiGamepad.Core.BluetoothRecovery.PairingUiLauncher = () =>
+                {
+                    if (!InteractiveSessionLauncher.StartInActiveConsoleSession(
+                            @"C:\Windows\explorer.exe", "explorer.exe ms-settings:bluetooth"))
+                    {
+                        ServiceLog.Write("[蓝牙自愈] 未找到活动用户会话, 请手动打开系统蓝牙设置完成配对。");
+                    }
+                };
 
                 _manager.GamepadConnected += (s, pad) =>
                     ServiceLog.Write($"[+] 手柄已连接 -> 虚拟 Xbox 360 (Player {pad.PlayerIndex}), " +
@@ -34,6 +45,12 @@ namespace MiGamepad.App
                 ServiceLog.Write(
                     $"后台扫描已启动 (ViGEmBus={(_manager.IsViGEmBusAvailable ? "OK" : "缺失")}, " +
                     $"HidHide={(_manager.IsHidHideAvailable ? "OK" : "缺失")})");
+
+                // 服务以 SYSTEM 运行: 写 HKLM 全局抑制 Win11 ms-gamebar 弹窗
+                if (GameBarSuppressor.EnsureSuppressed(out string gameBarSummary))
+                {
+                    ServiceLog.Write($"[GameBar] {gameBarSummary}");
+                }
             }
             catch (Exception ex)
             {

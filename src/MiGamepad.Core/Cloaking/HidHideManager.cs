@@ -122,5 +122,31 @@ namespace MiGamepad.Core.Cloaking
             }
             catch { }
         }
+
+        /// <summary>
+        /// 清理历史会话遗留的小米手柄屏蔽规则。
+        /// 程序异常退出/系统强关时 uncloak 不会执行, 旧实例号 (&N 递增) 的规则会永久残留,
+        /// 导致游戏侧看不到手柄。启动时清理是安全的: 当前在线手柄会在被接管时重新隐藏。
+        /// </summary>
+        public void RemoveStaleXiaomiRules()
+        {
+            if (!_isAvailable || _service == null) return;
+
+            try
+            {
+                foreach (string instanceId in _service.BlockedInstanceIds.ToList())
+                {
+                    if (instanceId.IndexOf("VID&00022717_PID&3144", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        _service.RemoveBlockedInstanceId(instanceId);
+                        Debug.WriteLine($"[HidHideManager] 已清理遗留屏蔽规则: {instanceId}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[HidHideManager] 清理遗留规则失败 (需管理员权限): {ex.Message}");
+            }
+        }
     }
 }
