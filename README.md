@@ -24,9 +24,11 @@
 
 ### ① 下载
 
-前往 [**Releases**](../../releases) 页面，下载 `MiGamepad.App.exe`（或完整压缩包 `MiGamepad-Portable.zip`）。
+前往 [**Releases**](../../releases) 页面，下载最新版的 `MiGamepad-<版本号>-win-x64.zip` 并解压（也可单独下载 `MiGamepad.App.exe`）。
 
 > 系统要求：Windows 10（1809+）/ Windows 11，x64，自带蓝牙或 USB 蓝牙适配器。
+
+> 💡 **SmartScreen 告警属正常现象**：exe 未做商业代码签名（个人开源项目的常态），首次运行时 Windows 可能弹出"Windows 已保护你的电脑"，点击 **`更多信息 → 仍要运行`** 即可；部分杀毒软件也可能误报。本项目源码完全开放，可自行审查或从源码构建；如不放心，可先将 zip 提交 [VirusTotal](https://www.virustotal.com) 复核（个别引擎对未签名新程序的误报可忽略）。
 
 ### ② 小米手柄进入蓝牙配对
 
